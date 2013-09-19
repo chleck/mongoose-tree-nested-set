@@ -1,0 +1,16 @@
+{
+  "author": "Dmitry Chleck <dmitrychleck@gmail.com>",
+  "name": "mongoose-tree-nested-set",
+  "description": "Mongoose Tree",
+  "version": "0.0.1",
+  "private": true,
+  "repository": {
+    "type": "https",
+    "url": "https://github.com/chleck/mongoose-tree-nested-set.git"
+  },
+  "scripts": {
+  },
+  "dependencies": {
+    "mongoose": "*"
+  }
+}
