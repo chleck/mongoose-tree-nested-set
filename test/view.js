@@ -30,12 +30,17 @@ function pad(n) {
 
 Test.findOne({ name: 'Root' }).sort('_tree.l').exec(function(err, node) {
   if(err) return console.log('Error:', err);
-  node.branch().sort('name').select('name').exec(function(err, branch) {
+  node.branch(true).select('_tree name').exec(function(err, branch) {
     if(err) return console.log('Error:', err);
     for(var i in branch) {
       var node = branch[i];
-      console.log(pad(node.level) + node.name + ' (' + node._tree.l + ', ' + node._tree.r + ')');
+      console.log(pad(node.level) + node._id + ' ' + node.name + ' (' + node._tree.l + ', ' + node._tree.r + ')');
     }
     process.exit();
+    // Test.leafs().exec(function(err, leafs) {
+    //   for(var i in leafs) console.log(leafs[i].name);
+    //   process.exit();
+    // })
   })
 })
+

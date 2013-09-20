@@ -15,32 +15,12 @@ function Plugin(schema, options) {
     lvl: { type: Number, min: 0 }
   }});
 
-  schema.statics.rootId = rootId;
-
-  schema
-    .virtual('rootId')
-    .get(function() {
-      return rootId;
-    });
-
-  schema
-    .virtual('parentId')
-    .get(function() {
-      // Return new parent id if defined or current parent id or root id
-      return this._tree._p || this._tree.p || rootId;
-    })
-    .set(function(id) {
-      // Just set a new parent id
-      this._tree._p = id;
-    });
-
-  schema
-    .virtual('level')
-    .get(function() {
-      return this._tree.lvl;
-    });
+  schema.index({ parentId: 1 });
+  schema.index({ lft: 1, rgt: 1 });
+  schema.index({ rgt: 1 });
 
   // Create or move node
+  // ADD TO TREE ONLY NEWLY CREATED NODES !!! USE .move() FOR ANY EXISTENT NODE !!!
   schema.pre('save', function(next) {
     var self = this;
     // Root node
@@ -59,7 +39,6 @@ function Plugin(schema, options) {
       self.constructor.findById(self.parentId, function(err, parent) {
         if(err) return console.log('Can\'t get parent:', err);
         var r = parent._tree.r;
-          // , lvl = parent._tree.lvl + 1;
         self.constructor.update(
           { '_tree.l': { $gt: r }},
           { $inc: { '_tree.l': 2, '_tree.r': 2 }},
@@ -115,21 +94,117 @@ function Plugin(schema, options) {
       }
     )
   });
-  // Select branch
-  schema.method('branch', function() {
-    return this.constructor.find()
+  // Rebuild the tree using parent links (_tree.p)
+  schema.static('rebuild', function(done) {
+    var self = this
+      , right = 1
+      , lvl = 0;
+    // Start build from the root node
+    node(self.rootId, 1, done);
+    function node(id, left, next) {
+      lvl++;
+      self.find({ '_tree.p': id }, function(err, children) {
+        if(err) return next(err);
+        var i = 0;
+        eachChild();
+        function eachChild(err) {
+          if(err) return next(err);
+          // Calculate each child
+          if(i < children.length) return node(children[i++].id, ++right, eachChild);
+          // Update current node
+          self.update({ _id: id }, { '_tree.l': left, '_tree.r': ++right, '_tree.lvl': --lvl }, next);
+        }
+      })
+    }
+  })
+  // Id of the root node (through model)
+  schema.statics.rootId = rootId;
+  // Id of the root node (through document)
+  schema
+    .virtual('rootId')
+    .get(function() {
+      return rootId;
+    });
+  // Number of hops to the root node
+  schema
+    .virtual('level')
+    .get(function() {
+      return this._tree.lvl;
+    });
+  // ???
+  schema
+    .virtual('parentId')
+    .get(function() {
+      // Return new parent id if defined or current parent id or root id
+      return this._tree._p || this._tree.p || rootId;
+    })
+    .set(function(id) {
+      // Just set a new parent id
+      this._tree._p = id;
+    });
+  // Return true if the node is a leaf (has no children)
+  schema.method('isLeaf', function() {
+    return this._tree.r - this._tree.l === 1;
+  });
+  // Returns true if the node is a descendant of other
+  schema.method('isDescendantOf', function(other) {
+    return this._tree.l > other._tree.l && this._tree.r < other._tree.r;
+  });
+  // Returns true if the node is an ancestor of other
+  schema.method('isAncestorOf', function(other) {
+    return this._tree.l < other._tree.l && this._tree.r > other._tree.r;
+  });
+  // Select parent node
+  schema.method('parent', function() {
+    return this.constructor.findOne({ _id: this._tree.p });
+  });
+  // Select children
+  schema.method('children', function(sort) {
+    var query = this.constructor.find({ '_tree.p': this._id});
+    if(sort) query = query.sort('_tree.l')
+    return query;
+  });
+  // Select descendants
+  schema.method('descendants', function(sort) {
+    var query = this.constructor.find()
       .where('_tree.l').gte(this._tree.l)
-      .where('_tree.r').lte(this._tree.r)
-      .select('_tree')
-      .sort('_tree.l');
+      .where('_tree.r').lte(this._tree.r);
+    if(sort) query = query.sort('_tree.l')
+    return query;
   });
-
-  schema.method('ancestors', function() {
-    // SELECT id, name, level FROM my_tree WHERE left_key <= $left_key AND right_key >= $right_key ORDER BY left_key
+  // Select ancestors
+  schema.method('ancestors', function(sort) {
+    var query = this.constructor.find()
+      .where('_tree.l').lte(this._tree.l)
+      .where('_tree.r').gte(this._tree.r);
+    if(sort) query = query.sort('_tree.l')
+    return query;
   });
-
-  schema.method('ancestorsAndBranch', function() {
-    // SELECT id, name, level FROM my_tree WHERE right_key > $left_key AND left_key < $right_key ORDER BY left_key
+  // Select branch (ancestors, self and descendants)
+  schema.method('branch', function(sort) {
+    var query = this.constructor.find()
+      .where('_tree.r').gt(this._tree.l)
+      .where('_tree.l').lt(this._tree.r);
+    if(sort) query = query.sort('_tree.l')
+    return query;
+  });
+  // Select siblings (all nodes with the same parent)
+  schema.method('siblings', function(sort) {
+    var query = this.constructor.find({ '_tree.p': this._tree.p });
+    if(sort) query = query.sort('_tree.l')
+    return query;
+  });
+  // Find leafs
+  schema.static('leafs', function(sort) {
+    var query = this.$where('this._tree.r - this._tree.l === 1');
+    if(sort) query = query.sort('_tree.l')
+    return query;
+  });
+  // Find leafs in descendants
+  schema.method('leafs', function(sort) {
+    var query = this.descendants().$where('this._tree.r - this._tree.l === 1');
+    if(sort) query = query.sort('_tree.l')
+    return query;
   });
 }
 
